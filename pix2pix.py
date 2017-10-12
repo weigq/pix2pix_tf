@@ -12,9 +12,9 @@ import collections
 import math
 import time
 
-from opt import Options
+from options import Options
 
-a = Options().parse()
+opt = Options().parse()
 
 EPS = 1e-12
 CROP_SIZE = 256
@@ -138,7 +138,7 @@ def rgb_to_lab(srgb):
             ])
             xyz_pixels = tf.matmul(rgb_pixels, rgb_to_xyz)
 
-        # https://en.wikipedia.org/wiki/Lab_color_space#CIELAB-CIEXYZ_conversions
+        # https://en.wikipediopt.org/wiki/Lab_color_space#CIELAB-CIEXYZ_conversions
         with tf.name_scope("xyz_to_cielab"):
             # convert to fx = f(X/Xn), fy = f(Y/Yn), fz = f(Z/Zn)
 
@@ -167,7 +167,7 @@ def lab_to_rgb(lab):
         lab = check_image(lab)
         lab_pixels = tf.reshape(lab, [-1, 3])
 
-        # https://en.wikipedia.org/wiki/Lab_color_space#CIELAB-CIEXYZ_conversions
+        # https://en.wikipediopt.org/wiki/Lab_color_space#CIELAB-CIEXYZ_conversions
         with tf.name_scope("cielab_to_xyz"):
             # convert to fxfyfz
             lab_to_fxfyfz = tf.constant([
@@ -205,13 +205,13 @@ def lab_to_rgb(lab):
 
 
 def load_examples():
-    if a.input_dir is None or not os.path.exists(a.input_dir):
+    if opt.input_dir is None or not os.path.exists(opt.input_dir):
         raise Exception("input_dir does not exist")
 
-    input_paths = glob.glob(os.path.join(a.input_dir, "*.jpg"))
+    input_paths = glob.glob(os.path.join(opt.input_dir, "*.jpg"))
     decode = tf.image.decode_jpeg
     if len(input_paths) == 0:
-        input_paths = glob.glob(os.path.join(a.input_dir, "*.png"))
+        input_paths = glob.glob(os.path.join(opt.input_dir, "*.png"))
         decode = tf.image.decode_png
 
     if len(input_paths) == 0:
@@ -229,7 +229,7 @@ def load_examples():
         input_paths = sorted(input_paths)
 
     with tf.name_scope("load_images"):
-        path_queue = tf.train.string_input_producer(input_paths, shuffle=a.mode == "train")
+        path_queue = tf.train.string_input_producer(input_paths, shuffle=opt.mode == "train")
         reader = tf.WholeFileReader()
         paths, contents = reader.read(path_queue)
         raw_input = decode(contents)
@@ -241,7 +241,7 @@ def load_examples():
 
         raw_input.set_shape([None, None, 3])
 
-        if a.lab_colorization:
+        if opt.lab_colorization:
             # load color and brightness from image, no B image exists here
             lab = rgb_to_lab(raw_input)
             L_chan, a_chan, b_chan = preprocess_lab(lab)
@@ -253,9 +253,9 @@ def load_examples():
             a_images = preprocess(raw_input[:,:width//2,:])
             b_images = preprocess(raw_input[:,width//2:,:])
 
-    if a.which_direction == "AtoB":
+    if opt.which_direction == "AtoB":
         inputs, targets = [a_images, b_images]
-    elif a.which_direction == "BtoA":
+    elif opt.which_direction == "BtoA":
         inputs, targets = [b_images, a_images]
     else:
         raise Exception("invalid direction")
@@ -265,17 +265,17 @@ def load_examples():
     seed = random.randint(0, 2**31 - 1)
     def transform(image):
         r = image
-        if a.flip:
+        if opt.flip:
             r = tf.image.random_flip_left_right(r, seed=seed)
 
         # area produces a nice downscaling, but does nearest neighbor for upscaling
         # assume we're going to be doing downscaling here
-        r = tf.image.resize_images(r, [a.scale_size, a.scale_size], method=tf.image.ResizeMethod.AREA)
+        r = tf.image.resize_images(r, [opt.scale_size, opt.scale_size], method=tf.image.ResizeMethod.AREA)
 
-        offset = tf.cast(tf.floor(tf.random_uniform([2], 0, a.scale_size - CROP_SIZE + 1, seed=seed)), dtype=tf.int32)
-        if a.scale_size > CROP_SIZE:
+        offset = tf.cast(tf.floor(tf.random_uniform([2], 0, opt.scale_size - CROP_SIZE + 1, seed=seed)), dtype=tf.int32)
+        if opt.scale_size > CROP_SIZE:
             r = tf.image.crop_to_bounding_box(r, offset[0], offset[1], CROP_SIZE, CROP_SIZE)
-        elif a.scale_size < CROP_SIZE:
+        elif opt.scale_size < CROP_SIZE:
             raise Exception("scale size cannot be less than crop size")
         return r
 
@@ -285,8 +285,8 @@ def load_examples():
     with tf.name_scope("target_images"):
         target_images = transform(targets)
 
-    paths_batch, inputs_batch, targets_batch = tf.train.batch([paths, input_images, target_images], batch_size=a.batch_size)
-    steps_per_epoch = int(math.ceil(len(input_paths) / a.batch_size))
+    paths_batch, inputs_batch, targets_batch = tf.train.batch([paths, input_images, target_images], batch_size=opt.batch_size)
+    steps_per_epoch = int(math.ceil(len(input_paths) / opt.batch_size))
 
     return Examples(
         paths=paths_batch,
@@ -302,17 +302,17 @@ def create_generator(generator_inputs, generator_outputs_channels):
 
     # encoder_1: [batch, 256, 256, in_channels] => [batch, 128, 128, ngf]
     with tf.variable_scope("encoder_1"):
-        output = conv(generator_inputs, a.ngf, stride=2)
+        output = conv(generator_inputs, opt.ngf, stride=2)
         layers.append(output)
 
     layer_specs = [
-        a.ngf * 2, # encoder_2: [batch, 128, 128, ngf] => [batch, 64, 64, ngf * 2]
-        a.ngf * 4, # encoder_3: [batch, 64, 64, ngf * 2] => [batch, 32, 32, ngf * 4]
-        a.ngf * 8, # encoder_4: [batch, 32, 32, ngf * 4] => [batch, 16, 16, ngf * 8]
-        a.ngf * 8, # encoder_5: [batch, 16, 16, ngf * 8] => [batch, 8, 8, ngf * 8]
-        a.ngf * 8, # encoder_6: [batch, 8, 8, ngf * 8] => [batch, 4, 4, ngf * 8]
-        a.ngf * 8, # encoder_7: [batch, 4, 4, ngf * 8] => [batch, 2, 2, ngf * 8]
-        a.ngf * 8, # encoder_8: [batch, 2, 2, ngf * 8] => [batch, 1, 1, ngf * 8]
+        opt.ngf * 2, # encoder_2: [batch, 128, 128, ngf] => [batch, 64, 64, ngf * 2]
+        opt.ngf * 4, # encoder_3: [batch, 64, 64, ngf * 2] => [batch, 32, 32, ngf * 4]
+        opt.ngf * 8, # encoder_4: [batch, 32, 32, ngf * 4] => [batch, 16, 16, ngf * 8]
+        opt.ngf * 8, # encoder_5: [batch, 16, 16, ngf * 8] => [batch, 8, 8, ngf * 8]
+        opt.ngf * 8, # encoder_6: [batch, 8, 8, ngf * 8] => [batch, 4, 4, ngf * 8]
+        opt.ngf * 8, # encoder_7: [batch, 4, 4, ngf * 8] => [batch, 2, 2, ngf * 8]
+        opt.ngf * 8, # encoder_8: [batch, 2, 2, ngf * 8] => [batch, 1, 1, ngf * 8]
     ]
 
     for out_channels in layer_specs:
@@ -324,13 +324,13 @@ def create_generator(generator_inputs, generator_outputs_channels):
             layers.append(output)
 
     layer_specs = [
-        (a.ngf * 8, 0.5),   # decoder_8: [batch, 1, 1, ngf * 8] => [batch, 2, 2, ngf * 8 * 2]
-        (a.ngf * 8, 0.5),   # decoder_7: [batch, 2, 2, ngf * 8 * 2] => [batch, 4, 4, ngf * 8 * 2]
-        (a.ngf * 8, 0.5),   # decoder_6: [batch, 4, 4, ngf * 8 * 2] => [batch, 8, 8, ngf * 8 * 2]
-        (a.ngf * 8, 0.0),   # decoder_5: [batch, 8, 8, ngf * 8 * 2] => [batch, 16, 16, ngf * 8 * 2]
-        (a.ngf * 4, 0.0),   # decoder_4: [batch, 16, 16, ngf * 8 * 2] => [batch, 32, 32, ngf * 4 * 2]
-        (a.ngf * 2, 0.0),   # decoder_3: [batch, 32, 32, ngf * 4 * 2] => [batch, 64, 64, ngf * 2 * 2]
-        (a.ngf, 0.0),       # decoder_2: [batch, 64, 64, ngf * 2 * 2] => [batch, 128, 128, ngf * 2]
+        (opt.ngf * 8, 0.5),   # decoder_8: [batch, 1, 1, ngf * 8] => [batch, 2, 2, ngf * 8 * 2]
+        (opt.ngf * 8, 0.5),   # decoder_7: [batch, 2, 2, ngf * 8 * 2] => [batch, 4, 4, ngf * 8 * 2]
+        (opt.ngf * 8, 0.5),   # decoder_6: [batch, 4, 4, ngf * 8 * 2] => [batch, 8, 8, ngf * 8 * 2]
+        (opt.ngf * 8, 0.0),   # decoder_5: [batch, 8, 8, ngf * 8 * 2] => [batch, 16, 16, ngf * 8 * 2]
+        (opt.ngf * 4, 0.0),   # decoder_4: [batch, 16, 16, ngf * 8 * 2] => [batch, 32, 32, ngf * 4 * 2]
+        (opt.ngf * 2, 0.0),   # decoder_3: [batch, 32, 32, ngf * 4 * 2] => [batch, 64, 64, ngf * 2 * 2]
+        (opt.ngf, 0.0),       # decoder_2: [batch, 64, 64, ngf * 2 * 2] => [batch, 128, 128, ngf * 2]
     ]
 
     num_encoder_layers = len(layers)
@@ -375,7 +375,7 @@ def create_model(inputs, targets):
 
         # layer_1: [batch, 256, 256, in_channels * 2] => [batch, 128, 128, ndf]
         with tf.variable_scope("layer_1"):
-            convolved = conv(input, a.ndf, stride=2)
+            convolved = conv(input, opt.ndf, stride=2)
             rectified = lrelu(convolved, 0.2)
             layers.append(rectified)
 
@@ -384,7 +384,7 @@ def create_model(inputs, targets):
         # layer_4: [batch, 32, 32, ndf * 4] => [batch, 31, 31, ndf * 8]
         for i in range(n_layers):
             with tf.variable_scope("layer_%d" % (len(layers) + 1)):
-                out_channels = a.ndf * min(2**(i+1), 8)
+                out_channels = opt.ndf * min(2**(i+1), 8)
                 stride = 1 if i == n_layers - 1 else 2  # last layer here has stride 1
                 convolved = conv(layers[-1], out_channels, stride=stride)
                 normalized = batchnorm(convolved)
@@ -426,23 +426,23 @@ def create_model(inputs, targets):
         # abs(targets - outputs) => 0
         gen_loss_GAN = tf.reduce_mean(-tf.log(predict_fake + EPS))
         gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))
-        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight
+        gen_loss = gen_loss_GAN * opt.gan_weight + gen_loss_L1 * opt.l1_weight
 
     with tf.name_scope("discriminator_train"):
         discrim_tvars = [var for var in tf.trainable_variables() if var.name.startswith("discriminator")]
-        discrim_optim = tf.train.AdamOptimizer(a.lr, a.beta1)
+        discrim_optim = tf.train.AdamOptimizer(opt.lr, opt.beta1)
         discrim_grads_and_vars = discrim_optim.compute_gradients(discrim_loss, var_list=discrim_tvars)
         discrim_train = discrim_optim.apply_gradients(discrim_grads_and_vars)
 
     with tf.name_scope("generator_train"):
         with tf.control_dependencies([discrim_train]):
             gen_tvars = [var for var in tf.trainable_variables() if var.name.startswith("generator")]
-            gen_optim = tf.train.AdamOptimizer(a.lr, a.beta1)
+            gen_optim = tf.train.AdamOptimizer(opt.lr, opt.beta1)
             gen_grads_and_vars = gen_optim.compute_gradients(gen_loss, var_list=gen_tvars)
             gen_train = gen_optim.apply_gradients(gen_grads_and_vars)
 
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
-    update_losses = ema.apply([discrim_loss, gen_loss_GAN, gen_loss_L1])
+    update_losses = emopt.apply([discrim_loss, gen_loss_GAN, gen_loss_L1])
 
     global_step = tf.contrib.framework.get_or_create_global_step()
     incr_global_step = tf.assign(global_step, global_step+1)
@@ -450,10 +450,10 @@ def create_model(inputs, targets):
     return Model(
         predict_real=predict_real,
         predict_fake=predict_fake,
-        discrim_loss=ema.average(discrim_loss),
+        discrim_loss=emopt.average(discrim_loss),
         discrim_grads_and_vars=discrim_grads_and_vars,
-        gen_loss_GAN=ema.average(gen_loss_GAN),
-        gen_loss_L1=ema.average(gen_loss_L1),
+        gen_loss_GAN=emopt.average(gen_loss_GAN),
+        gen_loss_L1=emopt.average(gen_loss_L1),
         gen_grads_and_vars=gen_grads_and_vars,
         outputs=outputs,
         train=tf.group(update_losses, incr_global_step, gen_train),
@@ -461,7 +461,7 @@ def create_model(inputs, targets):
 
 
 def save_images(fetches, step=None):
-    image_dir = os.path.join(a.output_dir, "images")
+    image_dir = os.path.join(opt.output_dir, "images")
     if not os.path.exists(image_dir):
         os.makedirs(image_dir)
 
@@ -483,7 +483,7 @@ def save_images(fetches, step=None):
 
 
 def append_index(filesets, step=False):
-    index_path = os.path.join(a.output_dir, "index.html")
+    index_path = os.path.join(opt.output_dir, "index.html")
     if os.path.exists(index_path):
         index = open(index_path, "a")
     else:
@@ -511,40 +511,40 @@ def main():
     if tf.__version__.split('.')[0] != "1":
         raise Exception("Tensorflow of version 1.0+ required")
 
-    if a.seed is None:
-        a.seed = random.randint(0, 2**31 - 1)
+    if opt.seed is None:
+        opt.seed = random.randint(0, 2**31 - 1)
 
-    tf.set_random_seed(a.seed)
-    np.random.seed(a.seed)
-    random.seed(a.seed)
+    tf.set_random_seed(opt.seed)
+    np.random.seed(opt.seed)
+    random.seed(opt.seed)
 
-    if not os.path.exists(a.output_dir):
-        os.makedirs(a.output_dir)
+    if not os.path.exists(opt.output_dir):
+        os.makedirs(opt.output_dir)
 
-    if a.mode == "test" or a.mode == "export":
-        if a.checkpoint is None:
+    if opt.mode == "test" or opt.mode == "export":
+        if opt.checkpoint is None:
             raise Exception("checkpoint required for test mode")
 
         # load some options from the checkpoint
         options = {"which_direction", "ngf", "ndf", "lab_colorization"}
-        with open(os.path.join(a.checkpoint, "options.json")) as f:
+        with open(os.path.join(opt.checkpoint, "options.json")) as f:
             for key, val in json.loads(f.read()).items():
                 if key in options:
                     print("loaded", key, "=", val)
                     setattr(a, key, val)
         # disable these features in test mode
-        a.scale_size = CROP_SIZE
-        a.flip = False
+        opt.scale_size = CROP_SIZE
+        opt.flip = False
 
-    for k, v in a._get_kwargs():
+    for k, v in opt._get_kwargs():
         print(k, "=", v)
 
-    with open(os.path.join(a.output_dir, "options.json"), "w") as f:
+    with open(os.path.join(opt.output_dir, "options.json"), "w") as f:
         f.write(json.dumps(vars(a), sort_keys=True, indent=4))
 
-    if a.mode == "export":
+    if opt.mode == "export":
         # export the generator to a meta graph that can be imported later for standalone generation
-        if a.lab_colorization:
+        if opt.lab_colorization:
             raise Exception("export not supported for lab_colorization")
 
         input = tf.placeholder(tf.string, shape=[1])
@@ -564,9 +564,9 @@ def main():
             batch_output = deprocess(create_generator(preprocess(batch_input), 3))
 
         output_image = tf.image.convert_image_dtype(batch_output, dtype=tf.uint8)[0]
-        if a.output_filetype == "png":
+        if opt.output_filetype == "png":
             output_data = tf.image.encode_png(output_image)
-        elif a.output_filetype == "jpeg":
+        elif opt.output_filetype == "jpeg":
             output_data = tf.image.encode_jpeg(output_image, quality=80)
         else:
             raise Exception("invalid filetype")
@@ -591,11 +591,11 @@ def main():
         with tf.Session() as sess:
             sess.run(init_op)
             print("loading model from checkpoint")
-            checkpoint = tf.train.latest_checkpoint(a.checkpoint)
+            checkpoint = tf.train.latest_checkpoint(opt.checkpoint)
             restore_saver.restore(sess, checkpoint)
             print("exporting model")
-            export_saver.export_meta_graph(filename=os.path.join(a.output_dir, "export.meta"))
-            export_saver.save(sess, os.path.join(a.output_dir, "export"), write_meta_graph=False)
+            export_saver.export_meta_graph(filename=os.path.join(opt.output_dir, "export.meta"))
+            export_saver.save(sess, os.path.join(opt.output_dir, "export"), write_meta_graph=False)
 
         return
 
@@ -606,8 +606,8 @@ def main():
     model = create_model(examples.inputs, examples.targets)
 
     # undo colorization splitting on images that we use for display/output
-    if a.lab_colorization:
-        if a.which_direction == "AtoB":
+    if opt.lab_colorization:
+        if opt.which_direction == "AtoB":
             # inputs is brightness, this will be handled fine as a grayscale image
             # need to augment targets and outputs with brightness
             targets = augment(examples.targets, examples.inputs)
@@ -615,7 +615,7 @@ def main():
             # inputs can be deprocessed normally and handled as if they are single channel
             # grayscale images
             inputs = deprocess(examples.inputs)
-        elif a.which_direction == "BtoA":
+        elif opt.which_direction == "BtoA":
             # inputs will be color channels only, get brightness from targets
             inputs = augment(examples.inputs, examples.targets)
             targets = deprocess(examples.targets)
@@ -628,9 +628,9 @@ def main():
         outputs = deprocess(model.outputs)
 
     def convert(image):
-        if a.aspect_ratio != 1.0:
+        if opt.aspect_ratio != 1.0:
             # upscale to correct aspect ratio
-            size = [CROP_SIZE, int(round(CROP_SIZE * a.aspect_ratio))]
+            size = [CROP_SIZE, int(round(CROP_SIZE * opt.aspect_ratio))]
             image = tf.image.resize_images(image, size=size, method=tf.image.ResizeMethod.BICUBIC)
 
         return tf.image.convert_image_dtype(image, dtype=tf.uint8, saturate=True)
@@ -684,23 +684,23 @@ def main():
 
     saver = tf.train.Saver(max_to_keep=1)
 
-    logdir = a.output_dir if (a.trace_freq > 0 or a.summary_freq > 0) else None
+    logdir = opt.output_dir if (opt.trace_freq > 0 or opt.summary_freq > 0) else None
     sv = tf.train.Supervisor(logdir=logdir, save_summaries_secs=0, saver=None)
     with sv.managed_session() as sess:
         print("parameter_count =", sess.run(parameter_count))
 
-        if a.checkpoint is not None:
+        if opt.checkpoint is not None:
             print("loading model from checkpoint")
-            checkpoint = tf.train.latest_checkpoint(a.checkpoint)
+            checkpoint = tf.train.latest_checkpoint(opt.checkpoint)
             saver.restore(sess, checkpoint)
 
         max_steps = 2**32
-        if a.max_epochs is not None:
-            max_steps = examples.steps_per_epoch * a.max_epochs
-        if a.max_steps is not None:
-            max_steps = a.max_steps
+        if opt.max_epochs is not None:
+            max_steps = examples.steps_per_epoch * opt.max_epochs
+        if opt.max_steps is not None:
+            max_steps = opt.max_steps
 
-        if a.mode == "test":
+        if opt.mode == "test":
             # testing
             # at most, process the test data once
             max_steps = min(examples.steps_per_epoch, max_steps)
@@ -722,7 +722,7 @@ def main():
 
                 options = None
                 run_metadata = None
-                if should(a.trace_freq):
+                if should(opt.trace_freq):
                     options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                     run_metadata = tf.RunMetadata()
 
@@ -731,46 +731,46 @@ def main():
                     "global_step": sv.global_step,
                 }
 
-                if should(a.progress_freq):
+                if should(opt.progress_freq):
                     fetches["discrim_loss"] = model.discrim_loss
                     fetches["gen_loss_GAN"] = model.gen_loss_GAN
                     fetches["gen_loss_L1"] = model.gen_loss_L1
 
-                if should(a.summary_freq):
+                if should(opt.summary_freq):
                     fetches["summary"] = sv.summary_op
 
-                if should(a.display_freq):
+                if should(opt.display_freq):
                     fetches["display"] = display_fetches
 
                 results = sess.run(fetches, options=options, run_metadata=run_metadata)
 
-                if should(a.summary_freq):
+                if should(opt.summary_freq):
                     print("recording summary")
                     sv.summary_writer.add_summary(results["summary"], results["global_step"])
 
-                if should(a.display_freq):
+                if should(opt.display_freq):
                     print("saving display images")
                     filesets = save_images(results["display"], step=results["global_step"])
                     append_index(filesets, step=True)
 
-                if should(a.trace_freq):
+                if should(opt.trace_freq):
                     print("recording trace")
                     sv.summary_writer.add_run_metadata(run_metadata, "step_%d" % results["global_step"])
 
-                if should(a.progress_freq):
+                if should(opt.progress_freq):
                     # global_step will have the correct step count if we resume from a checkpoint
                     train_epoch = math.ceil(results["global_step"] / examples.steps_per_epoch)
                     train_step = (results["global_step"] - 1) % examples.steps_per_epoch + 1
-                    rate = (step + 1) * a.batch_size / (time.time() - start)
-                    remaining = (max_steps - step) * a.batch_size / rate
+                    rate = (step + 1) * opt.batch_size / (time.time() - start)
+                    remaining = (max_steps - step) * opt.batch_size / rate
                     print("progress  epoch %d  step %d  image/sec %0.1f  remaining %dm" % (train_epoch, train_step, rate, remaining / 60))
                     print("discrim_loss", results["discrim_loss"])
                     print("gen_loss_GAN", results["gen_loss_GAN"])
                     print("gen_loss_L1", results["gen_loss_L1"])
 
-                if should(a.save_freq):
+                if should(opt.save_freq):
                     print("saving model")
-                    saver.save(sess, os.path.join(a.output_dir, "model"), global_step=sv.global_step)
+                    saver.save(sess, os.path.join(opt.output_dir, "model"), global_step=sv.global_step)
 
                 if sv.should_stop():
                     break

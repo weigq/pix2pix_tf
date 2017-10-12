@@ -14,8 +14,8 @@ class Options():
         # =====================================================
         #               General Options
         # =====================================================
-        self.parser.add_argument("--input_dir",     type=str, default='facades/train', help="path to data path")
-        self.parser.add_argument("--output_dir",    type=str, default='facades/train', help="path to save result")
+        self.parser.add_argument("--input_dir",     type=str, default='/dataset/facades/train', help="path to data path")
+        self.parser.add_argument("--output_dir",    type=str, default='/dataset/facades/train_out', help="path to save result")
         self.parser.add_argument("--checkpoint",    type=str, default=None)
         self.parser.add_argument("--output_filetype", default="png", choices=["png", "jpeg"])
         self.parser.add_argument("--seed",          type=int, default=None)
