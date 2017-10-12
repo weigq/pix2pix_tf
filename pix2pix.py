@@ -442,7 +442,7 @@ def create_model(inputs, targets):
             gen_train = gen_optim.apply_gradients(gen_grads_and_vars)
 
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
-    update_losses = emopt.apply([discrim_loss, gen_loss_GAN, gen_loss_L1])
+    update_losses = ema.apply([discrim_loss, gen_loss_GAN, gen_loss_L1])
 
     global_step = tf.contrib.framework.get_or_create_global_step()
     incr_global_step = tf.assign(global_step, global_step+1)
@@ -450,10 +450,10 @@ def create_model(inputs, targets):
     return Model(
         predict_real=predict_real,
         predict_fake=predict_fake,
-        discrim_loss=emopt.average(discrim_loss),
+        discrim_loss=ema.average(discrim_loss),
         discrim_grads_and_vars=discrim_grads_and_vars,
-        gen_loss_GAN=emopt.average(gen_loss_GAN),
-        gen_loss_L1=emopt.average(gen_loss_L1),
+        gen_loss_GAN=ema.average(gen_loss_GAN),
+        gen_loss_L1=ema.average(gen_loss_L1),
         gen_grads_and_vars=gen_grads_and_vars,
         outputs=outputs,
         train=tf.group(update_losses, incr_global_step, gen_train),
@@ -509,10 +509,7 @@ def append_index(filesets, step=False):
 
 def main():
     if tf.__version__.split('.')[0] != "1":
-        raise Exception("Tensorflow of version 1.0+ required")
-
-    if opt.seed is None:
-        opt.seed = random.randint(0, 2**31 - 1)
+        raise Exception("Tensorflow 1.0+ required")
 
     tf.set_random_seed(opt.seed)
     np.random.seed(opt.seed)
@@ -531,7 +528,7 @@ def main():
             for key, val in json.loads(f.read()).items():
                 if key in options:
                     print("loaded", key, "=", val)
-                    setattr(a, key, val)
+                    setattr(opt, key, val)
         # disable these features in test mode
         opt.scale_size = CROP_SIZE
         opt.flip = False
@@ -540,7 +537,7 @@ def main():
         print(k, "=", v)
 
     with open(os.path.join(opt.output_dir, "options.json"), "w") as f:
-        f.write(json.dumps(vars(a), sort_keys=True, indent=4))
+        f.write(json.dumps(vars(opt), sort_keys=True, indent=4))
 
     if opt.mode == "export":
         # export the generator to a meta graph that can be imported later for standalone generation
