@@ -515,6 +515,7 @@ def main():
     np.random.seed(opt.seed)
     random.seed(opt.seed)
 
+    # create output dir
     if not os.path.exists(opt.output_dir):
         os.makedirs(opt.output_dir)
 

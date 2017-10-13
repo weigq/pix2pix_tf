@@ -42,7 +42,7 @@ class Options():
         self.parser.add_argument("--beta1",         type=float, default=0.5, help="momentum term of adam")
         self.parser.add_argument("--l1_weight",     type=float, default=100.0, help="weight on L1 loss of G")
         self.parser.add_argument("--gan_weight",    type=float, default=1.0, help="weight on GAN loss of G")
-        self.parser.add_argument("--max_steps",     type=int, help="# of training steps")
+        self.parser.add_argument("--max_steps",     type=int, default=200, help="# of training steps")
         self.parser.add_argument("--max_epochs",    type=int, default=100, help="# of training epochs")
         self.parser.add_argument("--summary_freq",  type=int, default=100, help="frequency of updating summary")
         self.parser.add_argument("--progress_freq", type=int, default=50, help="frequency of display progress")
