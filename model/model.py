@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-__all__ = ['create_model']
+__all__ = ['create_model', 'create_generator']
 
 import tensorflow as tf
 import collections

@@ -13,7 +13,8 @@ import math
 import time
 
 from options import Options
-from model import create_model
+from model import create_model, create_generator
+from utils.logger import save_images
 
 opt = Options().parse()
 
@@ -297,27 +298,6 @@ def load_examples():
         steps_per_epoch=steps_per_epoch,
     )
 
-def save_images(fetches, step=None):
-    image_dir = os.path.join(opt.output_dir, "images")
-    if not os.path.exists(image_dir):
-        os.makedirs(image_dir)
-
-    filesets = []
-    for i, in_path in enumerate(fetches["paths"]):
-        name, _ = os.path.splitext(os.path.basename(in_path.decode("utf8")))
-        fileset = {"name": name, "step": step}
-        for kind in ["inputs", "outputs", "targets"]:
-            filename = name + "-" + kind + ".png"
-            if step is not None:
-                filename = "%08d-%s" % (step, filename)
-            fileset[kind] = filename
-            out_path = os.path.join(image_dir, filename)
-            contents = fetches[kind][i]
-            with open(out_path, "wb") as f:
-                f.write(contents)
-        filesets.append(fileset)
-    return filesets
-
 
 def append_index(filesets, step=False):
     index_path = os.path.join(opt.output_dir, "index.html")
@@ -397,7 +377,7 @@ def main():
         batch_input = tf.expand_dims(input_image, axis=0)
 
         with tf.variable_scope("generator"):
-            batch_output = deprocess(create_generator(preprocess(batch_input), 3))
+            batch_output = deprocess(create_generator(preprocess(batch_input), 3, opt))
 
         output_image = tf.image.convert_image_dtype(batch_output, dtype=tf.uint8)[0]
         if opt.output_filetype == "png":
@@ -541,7 +521,7 @@ def main():
             max_steps = min(examples.steps_per_epoch, max_steps)
             for step in range(max_steps):
                 results = sess.run(display_fetches)
-                filesets = save_images(results)
+                filesets = save_images(results, opt)
                 for i, f in enumerate(filesets):
                     print("evaluated image", f["name"])
                 index_path = append_index(filesets)
@@ -585,7 +565,7 @@ def main():
 
                 if should(opt.display_freq):
                     print("saving display images")
-                    filesets = save_images(results["display"], step=results["global_step"])
+                    filesets = save_images(results["display"], opt=opt, step=results["global_step"])
                     append_index(filesets, step=True)
 
                 if should(opt.trace_freq):
