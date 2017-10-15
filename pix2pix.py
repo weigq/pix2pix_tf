@@ -2,6 +2,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from pprint import pprint
+
 import tensorflow as tf
 import numpy as np
 import os
@@ -352,9 +354,11 @@ def main():
         opt.flip = False
 
     # print options
-    for k, v in opt._get_kwargs():
-        print(k, "=", v)
+    print("==================Options=================\n")
+    pprint(vars(opt))
+    print("==========================================\n")
 
+    # save the options
     with open(os.path.join(opt.output_dir, "options.json"), "w") as f:
         f.write(json.dumps(vars(opt), sort_keys=True, indent=4))
 
